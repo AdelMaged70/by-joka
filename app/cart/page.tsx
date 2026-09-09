@@ -10,8 +10,23 @@ import Image from 'next/image'
 import { Trash2, Plus, Minus, ShoppingBag, ArrowRight } from 'lucide-react'
 
 export default function CartPage() {
-  const { items, removeItem, updateQuantity, totalPrice, totalItems } =
+  const { items, removeItem, updateQuantity, totalPrice, totalItems, isLoadingCart } =
     useCart()
+
+  if (isLoadingCart) {
+    return (
+      <div className="min-h-screen flex flex-col">
+        <Navigation />
+        <main className="flex-1 flex items-center justify-center py-16">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-muted-foreground text-lg">جاري تحميل السلة...</p>
+          </div>
+        </main>
+        <Footer />
+      </div>
+    )
+  }
 
   if (items.length === 0) {
     return (
@@ -64,12 +79,12 @@ export default function CartPage() {
                     <CardContent className="p-6">
                       <div className="flex gap-4">
                         {/* Product Image */}
-                        <div className="relative h-24 w-24 rounded-lg overflow-hidden flex-shrink-0">
+                        <div className="relative h-24 w-24 rounded-lg overflow-hidden flex-shrink-0 bg-slate-100 dark:bg-slate-900 border border-border/40 p-1">
                           <Image
                             src={item.image}
                             alt={item.nameAr}
                             fill
-                            className="object-cover"
+                            className="object-contain p-1"
                           />
                         </div>
 

@@ -36,16 +36,16 @@ export function ProductCard({ product }: ProductCardProps) {
 
   return (
     <Link href={`/product/${product.id}`}>
-      <Card className="overflow-hidden hover:shadow-xl transition-all duration-300 hover:-translate-y-1 h-full flex flex-col">
-        <div className="relative h-56 w-full overflow-hidden">
+      <Card className="overflow-hidden hover:shadow-xl transition-all duration-300 hover:-translate-y-1 h-full flex flex-col group">
+        <div className="relative h-64 sm:h-72 w-full overflow-hidden bg-slate-100 dark:bg-slate-900/50 flex items-center justify-center p-2">
           <Image
             src={product.image}
             alt={product.nameAr}
             fill
-            className="object-cover group-hover:scale-110 transition-transform duration-300"
+            className="object-contain p-1 group-hover:scale-105 transition-transform duration-300"
           />
           {product.bestSeller && (
-            <Badge className="absolute top-3 right-3 bg-accent gap-1">
+            <Badge className="absolute top-3 right-3 bg-accent gap-1 z-10 shadow-md">
               <Star className="h-3 w-3 fill-current" />
               الأكثر مبيعًا
             </Badge>

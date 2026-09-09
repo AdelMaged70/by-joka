@@ -25,7 +25,7 @@ interface Branch {
 }
 
 export default function CheckoutPage() {
-  const { items, totalPrice, clearCart } = useCart()
+  const { items, totalPrice, clearCart, isLoadingCart } = useCart()
   const router = useRouter()
   const { toast } = useToast()
   const { user, loading: authLoading, signInWithGoogle } = useAuth()
@@ -55,17 +55,15 @@ export default function CheckoutPage() {
   //   }
   // }, [user])
 
-  // Wait for cart to load before checking if empty
+  // Wait for cart and auth to finish loading before checking if empty
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setIsReady(true)
-      if (items.length === 0 && !isOrderCompletedRef.current) {
-        router.push('/cart')
-      }
-    }, 100)
-    
-    return () => clearTimeout(timer)
-  }, [items.length, router])
+    if (authLoading || isLoadingCart) return
+
+    setIsReady(true)
+    if (items.length === 0 && !isOrderCompletedRef.current) {
+      router.push('/cart')
+    }
+  }, [items.length, authLoading, isLoadingCart, router])
 
   // Fetch branches dynamically from Supabase
   useEffect(() => {
@@ -207,7 +205,7 @@ export default function CheckoutPage() {
   }
 
   // Show loading while auth or cart is loading
-  if (authLoading || !isReady) {
+  if (authLoading || isLoadingCart || !isReady) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
@@ -353,7 +351,7 @@ export default function CheckoutPage() {
                         />
                       </div>
 
-                      <div className="space-y-2">
+                      {/* <div className="space-y-2">
                         <Label htmlFor="branch" >
                           الفرع الأقرب <span className="text-destructive">*</span>
                         </Label>
@@ -384,7 +382,7 @@ export default function CheckoutPage() {
                             )}
                           </SelectContent>
                         </Select>
-                      </div>
+                      </div> */}
 
                       <div className="space-y-2">
                         <Label htmlFor="notes">ملاحظات إضافية (اختياري)</Label>
@@ -393,7 +391,7 @@ export default function CheckoutPage() {
                           name="notes"
                           value={formData.notes}
                           onChange={handleInputChange}
-                          placeholder="أ�� ملاحظات أو طلبات خاصة"
+                          placeholder=" ملاحظات "
                           className="text-primary placeholder:opacity-50"
                           rows={3}
                         />

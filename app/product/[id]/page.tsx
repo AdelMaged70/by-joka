@@ -74,16 +74,16 @@ export default async function ProductPage({ params }: ProductPageProps) {
           <div className="container mx-auto px-4">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
               {/* Product Image */}
-              <div className="relative aspect-square rounded-lg overflow-hidden shadow-xl">
+              <div className="relative min-h-[400px] md:min-h-[550px] w-full rounded-xl overflow-hidden shadow-xl bg-slate-100 dark:bg-slate-900/80 flex items-center justify-center p-4 border border-border/50">
                 <Image
                   src={product.image}
                   alt={product.nameAr}
                   fill
-                  className="object-cover"
+                  className="object-contain p-2"
                   priority
                 />
                 {product.bestSeller && (
-                  <Badge className="absolute top-4 right-4 text-base px-4 py-2 bg-accent gap-2">
+                  <Badge className="absolute top-4 right-4 text-base px-4 py-2 bg-accent gap-2 z-10 shadow-lg">
                     <Star className="h-4 w-4 fill-current" />
                     الأكثر مبيعًا
                   </Badge>
