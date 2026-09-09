@@ -11,7 +11,8 @@ export const metadata = {
 }
 
 // إعادة التحقق كل 60 ثانية (ISR) حتى تنعكس التغييرات من الداتابيز تلقائياً
-export const revalidate = 60
+// export const revalidate = 60
+export const dynamic = 'force-dynamic';
 
 export default async function CategoriesPage() {
   const dbCategories = await getCategories()

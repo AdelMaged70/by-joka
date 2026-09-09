@@ -11,7 +11,8 @@ import {
   toProductShape,
 } from '@/lib/db'
 
-export const revalidate = 60
+// export const revalidate = 60
+export const dynamic = 'force-dynamic';
 
 interface CategoryPageProps {
   params: Promise<{ id: string }>
