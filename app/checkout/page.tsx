@@ -10,11 +10,8 @@ import { useCart } from '@/contexts/cart-context'
 import { useRouter } from 'next/navigation'
 import { useState, useEffect, useRef } from 'react'
 import { getBranches, createOrder } from '@/app/actions/admin-actions'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { useToast } from '@/hooks/use-toast'
-import { CheckCircle2 } from 'lucide-react'
 import { useAuth } from '@/contexts/auth-context'
 
 interface Branch {
@@ -32,7 +29,6 @@ export default function CheckoutPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isReady, setIsReady] = useState(false)
   const [branches, setBranches] = useState<Branch[]>([])
-  const [branchesLoading, setBranchesLoading] = useState(true)
   const [walletNumber, setWalletNumber] = useState('')
   const isOrderCompletedRef = useRef(false)
 
@@ -40,12 +36,11 @@ export default function CheckoutPage() {
     name: '',
     phone: '',
     address: '',
-    branch: '',
+    branch: '', 
     paymentMethod: 'cash',
     notes: '',
   })
 
-  // Wait for cart and auth to finish loading before checking if empty
   useEffect(() => {
     if (authLoading || isLoadingCart) return
 
@@ -55,35 +50,21 @@ export default function CheckoutPage() {
     }
   }, [items.length, authLoading, isLoadingCart, router])
 
-  // Fetch branches dynamically from Supabase and auto-select Desouk
   useEffect(() => {
-    async function fetchBranches() {
-      setBranchesLoading(true)
+    async function fetchDefaultBranch() {
       const result = await getBranches()
-      if (result.branches) {
+      if (result.branches && result.branches.length > 0) {
         setBranches(result.branches)
-
-        // البحث التلقائي عن فرع دسوق وتحديده
-        const desoukBranch = result.branches.find(
-          (b: Branch) => 
-            b.name.toLowerCase().includes('desouk') || 
-            b.nameAr.toLowerCase().includes('دسوق') ||
-            b.city.toLowerCase().includes('desouk')
-        )
-
-        if (desoukBranch) {
-          setFormData((prev) => ({ ...prev, branch: desoukBranch.id }))
-        }
+        setFormData((prev) => ({ ...prev, branch: result.branches[0].id }))
       } else {
         toast({
           title: 'تحذير',
-          description: 'تعذّر تحميل الفروع، حاول تحديث الصفحة',
+          description: 'تعذّر جلب بيانات الفرع، حاول تحديث الصفحة',
           variant: 'destructive',
         })
       }
-      setBranchesLoading(false)
     }
-    fetchBranches()
+    fetchDefaultBranch()
   }, [])
 
   const handleInputChange = (
@@ -116,13 +97,11 @@ export default function CheckoutPage() {
     setIsSubmitting(true)
 
     try {
-      // Find the selected branch ID
-      const selectedBranch = branches.find((b: Branch) => b.id === formData.branch)
+      const selectedBranch = branches.find((b: Branch) => b.id === formData.branch) || branches[0]
       if (!selectedBranch) {
-        throw new Error('الفرع غير صحيح')
+        throw new Error('الفرع غير متوفر')
       }
 
-      // Prepare order items
       const orderItems = items.map(item => ({
         productName: item.nameAr || item.name || 'منتج',
         productId: item.id || (item as any).productId || 'unknown',
@@ -130,47 +109,6 @@ export default function CheckoutPage() {
         price: item.price
       }))
 
-      if (formData.paymentMethod === 'wallet' || formData.paymentMethod === 'card') {
-        if (formData.paymentMethod === 'wallet' && !walletNumber) {
-          throw new Error('الرجاء إدخال رقم المحفظة الإلكترونية لإتمام عملية الدفع')
-        }
-
-        const walletRes = await fetch('/api/paymob/create-payment', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            branchId: selectedBranch.id,
-            customerName: formData.name,
-            customerPhone: formData.phone,
-            customerEmail: user.email || '',
-            customerAddress: formData.address,
-            totalPrice: totalPrice,
-            items: orderItems,
-            notes: formData.notes,
-            walletNumber: walletNumber,
-            paymentType: formData.paymentMethod // 'wallet' | 'card'
-          })
-        })
-
-        const walletData = await walletRes.json()
-        if (!walletRes.ok || walletData.error) {
-          throw new Error(walletData.error || 'فشلت عملية تهيئة الدفع من Paymob')
-        }
-
-        toast({
-          title: 'جاري تحويلك لبوابة الدفع...',
-          description: 'برجاء الانتظار لاتمام العملية',
-        })
-
-        isOrderCompletedRef.current = true
-        clearCart()
-        
-        // Redirect to Paymob payment page
-        window.location.href = walletData.redirectUrl
-        return
-      }
-
-      // Create order in database (Cash payment)
       const result = await createOrder(
         selectedBranch.id,
         formData.name,
@@ -206,57 +144,33 @@ export default function CheckoutPage() {
     }
   }
 
-  // Show loading while auth or cart is loading
   if (authLoading || isLoadingCart || !isReady) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-muted-foreground bg-primary/0">جاري التحميل...</p>
+          <p className="text-muted-foreground">جاري التحميل...</p>
         </div>
       </div>
     )
   }
 
-  // Show login required state if user is not signed in
   if (!user) {
     return (
       <div className="min-h-screen flex flex-col justify-between">
         <Navigation />
-        <main className="flex-1 flex items-center justify-center py-16 px-4 bg-[#0a0e1a] text-white relative overflow-hidden">
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-blue-900/20 via-black to-red-950/20 pointer-events-none" />
-          <div className="relative z-10 max-w-md w-full mx-auto bg-black/40 backdrop-blur-xl border border-white/10 rounded-3xl p-8 text-center shadow-2xl">
-            <div className="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-accent flex items-center justify-center text-3xl mb-6 shadow-lg">
-              🔒
-            </div>
+        <main className="flex-1 flex items-center justify-center py-16 px-4 bg-[#0a0e1a] text-white">
+          <div className="max-w-md w-full mx-auto bg-black/40 backdrop-blur-xl border border-white/10 rounded-3xl p-8 text-center shadow-2xl">
             <h2 className="text-2xl font-bold mb-3 text-white">تسجيل الدخول مطلوب</h2>
-            <p className="text-muted-foreground text-sm mb-8 leading-relaxed">
-              من فضلك قم بتسجيل الدخول بحساب Google الخاص بك لتتمكن من إتمام عملية الطلب ومتابعتها بسهولة.
+            <p className="text-muted-foreground text-sm mb-8">
+              من فضلك قم بتسجيل الدخول بحساب Google الخاص بك لإتمام الطلب.
             </p>
             <Button
               size="lg"
-              className="w-full gap-3 cursor-pointer py-6 rounded-2xl text-base font-bold bg-white text-black hover:bg-white/95 shadow-xl flex items-center justify-center transition-all duration-200 active:scale-98"
+              className="w-full gap-3 py-6 rounded-2xl bg-white text-black hover:bg-white/95"
               onClick={() => signInWithGoogle(window.location.href)}
             >
-              <svg className="h-5 w-5" viewBox="0 0 24 24">
-                <path
-                  fill="#EA4335"
-                  d="M12 5.04c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                />
-                <path
-                  fill="#4285F4"
-                  d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31l3.57 2.77c2.08-1.92 3.28-4.74 3.28-8.09z"
-                />
-                <path
-                  fill="#FBBC05"
-                  d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l3.66-2.85z"
-                />
-                <path
-                  fill="#34A853"
-                  d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                />
-              </svg>
-              <span>تسجيل الدخول باستخدام Google</span>
+              تسجيل الدخول باستخدام Google
             </Button>
           </div>
         </main>
@@ -265,29 +179,20 @@ export default function CheckoutPage() {
     )
   }
 
-  if (items.length === 0 && !isOrderCompletedRef.current) {
-    return null
-  }
-
   return (
     <div className="min-h-screen flex flex-col">
       <Navigation />
       <main className="flex-1">
-        {/* Header */}
         <section className="bg-primary text-primary-foreground py-12">
           <div className="container mx-auto px-4">
-            <h1 className="text-4xl md:text-5xl font-bold text-center">
-              إتمام الطلب
-            </h1>
+            <h1 className="text-4xl md:text-5xl font-bold text-center">إتمام الطلب</h1>
           </div>
         </section>
 
-        {/* Checkout Form */}
         <section className="py-16">
           <div className="container mx-auto px-4">
             <form onSubmit={handleSubmit}>
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                {/* Customer Information */}
                 <div className="lg:col-span-2 space-y-6">
                   <Card>
                     <CardHeader>
@@ -296,25 +201,19 @@ export default function CheckoutPage() {
                     <CardContent className="space-y-4">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-2">
-                          <Label htmlFor="name">
-                            الاسم الكامل <span className="text-destructive">*</span>
-                          </Label>
+                          <Label htmlFor="name">الاسم الكامل <span className="text-destructive">*</span></Label>
                           <Input
                             id="name"
                             name="name"
                             value={formData.name}
                             onChange={handleInputChange}
-                            placeholder="أدخل اسمك" 
-                            autoComplete="off"
-                            className="text-primary placeholder:opacity-50"
+                            placeholder="أدخل اسمك"
+                            className="placeholder:opacity-40"
                             required
                           />
                         </div>
-
                         <div className="space-y-2">
-                          <Label htmlFor="phone">
-                            رقم الهاتف <span className="text-destructive">*</span>
-                          </Label>
+                          <Label htmlFor="phone">رقم الهاتف <span className="text-destructive">*</span></Label>
                           <Input
                             id="phone"
                             name="phone"
@@ -322,7 +221,7 @@ export default function CheckoutPage() {
                             value={formData.phone}
                             onChange={handleInputChange}
                             placeholder="01234567890"
-                            className="text-primary placeholder:opacity-50"
+                            className="placeholder:opacity-40"
                             required
                           />
                         </div>
@@ -336,52 +235,17 @@ export default function CheckoutPage() {
                     </CardHeader>
                     <CardContent className="space-y-4">
                       <div className="space-y-2">
-                        <Label htmlFor="address">
-                          العنوان <span className="text-destructive">*</span>
-                        </Label>
+                        <Label htmlFor="address">العنوان بالتفصيل <span className="text-destructive">*</span></Label>
                         <Textarea
                           id="address"
                           name="address"
                           value={formData.address}
                           onChange={handleInputChange}
-                          placeholder="أدخل عنوانك بالتفصيل"
+                          placeholder="ادخل العنوان..."
                           rows={3}
-                          className="text-primary placeholder:opacity-50"
+                          className="placeholder:opacity-40"
                           required
                         />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="branch">
-                          الفرع الأقرب <span className="text-destructive">*</span>
-                        </Label>
-                        <Select
-                          value={formData.branch}
-                          onValueChange={(value) =>
-                            setFormData({ ...formData, branch: value })
-                          }
-                          required
-                        >
-                          <SelectTrigger className="text-primary data-[placeholder]:opacity-50">
-                            <SelectValue placeholder={branchesLoading ? 'جاري تحميل الفروع...' : 'اختر الفرع'} />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {branchesLoading ? (
-                              <div className="flex items-center justify-center p-4 text-sm text-muted-foreground">
-                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary mr-2" />
-                                جاري تحميل الفروع...
-                              </div>
-                            ) : branches.length === 0 ? (
-                              <div className="p-4 text-sm text-center text-muted-foreground">لا توجد فروع متاحة</div>
-                            ) : (
-                              branches.map((branch: Branch) => (
-                                <SelectItem key={branch.id} value={branch.id} className="bg-red-700 text-yellow-400 focus:bg-red-800 focus:text-yellow-400 data-[highlighted]:bg-red-800 data-[highlighted]:text-yellow-400">
-                                  {branch.nameAr}
-                                </SelectItem>
-                              ))
-                            )}
-                          </SelectContent>
-                        </Select>
                       </div>
 
                       <div className="space-y-2">
@@ -391,16 +255,15 @@ export default function CheckoutPage() {
                           name="notes"
                           value={formData.notes}
                           onChange={handleInputChange}
-                          placeholder=" ملاحظات "
-                          className="text-primary placeholder:opacity-50"
+                          placeholder="أي تعليمات خاصة بالتوصيل..."
                           rows={3}
+                          className="placeholder:opacity-40"
                         />
                       </div>
                     </CardContent>
                   </Card>
                 </div>
 
-                {/* Order Summary */}
                 <div className="lg:col-span-1">
                   <Card className="sticky top-20">
                     <CardHeader>
@@ -409,43 +272,26 @@ export default function CheckoutPage() {
                     <CardContent className="space-y-6">
                       <div className="space-y-3 max-h-60 overflow-y-auto">
                         {items.map((item) => (
-                          <div
-                            key={item.id}
-                            className="flex justify-between text-sm"
-                          >
-                            <span className="flex-1">
-                              {item.nameAr} × {item.quantity}
-                            </span>
-                            <span className="font-semibold">
-                              {(item.price * item.quantity).toFixed(0)} جنيه
-                            </span>
+                          <div key={item.id} className="flex justify-between text-sm">
+                            <span className="flex-1">{item.nameAr} × {item.quantity}</span>
+                            <span className="font-semibold">{(item.price * item.quantity).toFixed(0)} جنيه</span>
                           </div>
                         ))}
                       </div>
 
                       <div className="border-t pt-4 space-y-3">
                         <div className="flex justify-between text-lg">
-                          <span className="text-muted-foreground">
-                            المجموع الفرعي
-                          </span>
-                          <span className="font-semibold">
-                            {totalPrice.toFixed(0)} جنيه
-                          </span>
+                          <span className="text-muted-foreground">المجموع الفرعي</span>
+                          <span className="font-semibold">{totalPrice.toFixed(0)} جنيه</span>
                         </div>
                         <div className="flex justify-between text-lg">
-                          <span className="text-muted-foreground">
-                            رسوم التوصيل
-                          </span>
-                          <span className="font-semibold text-green-600">
-                            مجانًا
-                          </span>
+                          <span className="text-muted-foreground">رسوم التوصيل</span>
+                          <span className="font-semibold text-green-600">مجانًا</span>
                         </div>
                         <div className="border-t pt-3">
                           <div className="flex justify-between text-2xl font-bold">
                             <span>الإجمالي</span>
-                            <span className="text-primary">
-                              {totalPrice.toFixed(0)} جنيه
-                            </span>
+                            <span className="text-primary">{totalPrice.toFixed(0)} جنيه</span>
                           </div>
                         </div>
                       </div>
