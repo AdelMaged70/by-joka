@@ -45,16 +45,6 @@ export default function CheckoutPage() {
     notes: '',
   })
 
-  // Prefill the user's name from Google metadata when they load
-  // useEffect(() => {
-  //   if (user) {
-  //     setFormData((prev) => ({
-  //       ...prev,
-  //       name: prev.name || user.user_metadata?.full_name || '',
-  //     }))
-  //   }
-  // }, [user])
-
   // Wait for cart and auth to finish loading before checking if empty
   useEffect(() => {
     if (authLoading || isLoadingCart) return
@@ -65,13 +55,25 @@ export default function CheckoutPage() {
     }
   }, [items.length, authLoading, isLoadingCart, router])
 
-  // Fetch branches dynamically from Supabase
+  // Fetch branches dynamically from Supabase and auto-select Desouk
   useEffect(() => {
     async function fetchBranches() {
       setBranchesLoading(true)
       const result = await getBranches()
       if (result.branches) {
         setBranches(result.branches)
+
+        // البحث التلقائي عن فرع دسوق وتحديده
+        const desoukBranch = result.branches.find(
+          (b: Branch) => 
+            b.name.toLowerCase().includes('desouk') || 
+            b.nameAr.toLowerCase().includes('دسوق') ||
+            b.city.toLowerCase().includes('desouk')
+        )
+
+        if (desoukBranch) {
+          setFormData((prev) => ({ ...prev, branch: desoukBranch.id }))
+        }
       } else {
         toast({
           title: 'تحذير',
@@ -156,7 +158,7 @@ export default function CheckoutPage() {
         }
 
         toast({
-          title: formData.paymentMethod === 'card' ? 'جاري تحويلك لبوابة الدفع...' : 'جاري تحويلك لبوابة الدفع...',
+          title: 'جاري تحويلك لبوابة الدفع...',
           description: 'برجاء الانتظار لاتمام العملية',
         })
 
@@ -222,7 +224,6 @@ export default function CheckoutPage() {
       <div className="min-h-screen flex flex-col justify-between">
         <Navigation />
         <main className="flex-1 flex items-center justify-center py-16 px-4 bg-[#0a0e1a] text-white relative overflow-hidden">
-          {/* Neon/Premium styling for sign in prompt */}
           <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-blue-900/20 via-black to-red-950/20 pointer-events-none" />
           <div className="relative z-10 max-w-md w-full mx-auto bg-black/40 backdrop-blur-xl border border-white/10 rounded-3xl p-8 text-center shadow-2xl">
             <div className="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-accent flex items-center justify-center text-3xl mb-6 shadow-lg">
@@ -264,7 +265,6 @@ export default function CheckoutPage() {
     )
   }
 
-  // Show nothing while redirecting
   if (items.length === 0 && !isOrderCompletedRef.current) {
     return null
   }
@@ -351,8 +351,8 @@ export default function CheckoutPage() {
                         />
                       </div>
 
-                      {/* <div className="space-y-2">
-                        <Label htmlFor="branch" >
+                      <div className="space-y-2">
+                        <Label htmlFor="branch">
                           الفرع الأقرب <span className="text-destructive">*</span>
                         </Label>
                         <Select
@@ -382,7 +382,7 @@ export default function CheckoutPage() {
                             )}
                           </SelectContent>
                         </Select>
-                      </div> */}
+                      </div>
 
                       <div className="space-y-2">
                         <Label htmlFor="notes">ملاحظات إضافية (اختياري)</Label>
@@ -398,77 +398,6 @@ export default function CheckoutPage() {
                       </div>
                     </CardContent>
                   </Card>
-
-                      {/* <Card>
-                        <CardHeader>
-                          <CardTitle className="text-2xl">طريقة الدفع</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          <RadioGroup
-                            value={formData.paymentMethod}
-                            onValueChange={(value) =>
-                              setFormData({ ...formData, paymentMethod: value })
-                            }
-                          >
-                            <div className="flex items-center space-x-2 space-x-reverse p-4 border rounded-lg cursor-pointer hover:bg-muted">
-                              <RadioGroupItem value="cash" id="cash" />
-                              <Label htmlFor="cash" className="flex-1 cursor-pointer">
-                                <div className="font-semibold text-primary">الدفع عند الاستلام</div>
-                                <div className="text-sm text-primary">
-                                  ادفع نقدًا عند استلام الطلب
-                                </div>
-                              </Label>
-                            </div>
-
-                            <div className="flex items-center space-x-2 space-x-reverse p-4 border rounded-lg cursor-pointer hover:bg-muted mt-2">
-                               <RadioGroupItem value="wallet" id="wallet" />
-                               <Label htmlFor="wallet" className="flex-1 cursor-pointer">
-                                 <div className="font-semibold text-primary">المحفظة الإلكترونية (Vodafone / Orange / Etisalat / WE Cash)</div>
-                                 <div className="text-sm text-primary">
-                                   ادفع مباشرة وبأمان باستخدام محفظتك المحمولة عبر بوابة Paymob
-                                 </div>
-                               </Label>
-                             </div>
-
-                             <div className="flex items-center space-x-2 space-x-reverse p-4 border rounded-lg cursor-pointer hover:bg-muted mt-2">
-                               <RadioGroupItem value="card" id="card" />
-                               <Label htmlFor="card" className="flex-1 cursor-pointer">
-                                 <div className="font-semibold text-primary flex items-center gap-2">
-                                   <span>بطاقة ائتمانية (Visa / Mastercard)</span>
-                                   <span className="flex gap-1">
-                                     <span className="inline-block bg-blue-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">VISA</span>
-                                     <span className="inline-block bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">MC</span>
-                                   </span>
-                                 </div>
-                                 <div className="text-sm text-primary">
-                                   ادفع ببطاقتك البنكية بأمان تام عبر بوابة Paymob المشفرة
-                                 </div>
-                               </Label>
-                             </div>
-                          </RadioGroup>
-
-                          {formData.paymentMethod === 'wallet' && (
-                            <div className="mt-4 p-4 bg-muted/40 border border-white/5 rounded-xl space-y-2">
-                              <Label htmlFor="walletNumber" className="text-sm font-semibold">
-                                رقم فيزا/محفظة الكاش للجوال <span className="text-destructive">*</span>
-                              </Label>
-                              <Input
-                                id="walletNumber"
-                                name="walletNumber"
-                                type="tel"
-                                value={walletNumber}
-                                onChange={(e) => setWalletNumber(e.target.value)}
-                                placeholder="010XXXXXXXX (مثال: 01012345678)"
-                                className="text-primary placeholder:opacity-50"
-                                required
-                              />
-                              <p className="text-xs text-muted-foreground">
-                                يرجى كتابة رقم الهاتف المرتبط بالمحفظة. سيتم توجيهك لصفحة الدفع الآمنة فورًا.
-                              </p>
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card> */}
                 </div>
 
                 {/* Order Summary */}
@@ -478,7 +407,6 @@ export default function CheckoutPage() {
                       <CardTitle className="text-2xl">ملخص الطلب</CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-6">
-                      {/* Order Items */}
                       <div className="space-y-3 max-h-60 overflow-y-auto">
                         {items.map((item) => (
                           <div

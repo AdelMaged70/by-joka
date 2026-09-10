@@ -308,3 +308,114 @@ export async function updateBranchStatus(branchId: string, isOpen: boolean) {
     return { error: 'فشل تحديث حالة الفرع' }
   }
 }
+
+export interface CustomerData {
+  id: string
+  name: string
+  email: string
+  createdAt: string
+  lastVideoAt?: string | null
+  videoMonths: number[]
+  videoCount: number
+  ordersCount: number
+}
+
+export async function getCustomersData() {
+  try {
+    // 1. Fetch registered accounts
+    const { data: accounts, error: accError } = await supabaseAdmin
+      .from('account')
+      .select('id, email, name, created_at, updated_at')
+
+    if (accError) {
+      console.warn('Could not fetch accounts table:', accError)
+    }
+
+    // 2. Fetch orders to collect customers who placed orders
+    const { data: orders } = await supabaseAdmin
+      .from('orders')
+      .select('customer_name, customer_email, customer_phone, created_at')
+      .order('created_at', { ascending: false })
+
+    // 3. Fetch active reviews/videos
+    const { data: reviews } = await supabaseAdmin
+      .from('reviews')
+      .select('id, video_url, created_at')
+
+    const customerMap = new Map<string, CustomerData>()
+
+    // Process accounts
+    if (accounts) {
+      accounts.forEach((acc: any) => {
+        if (!acc.email) return
+        const normalizedEmail = acc.email.trim().toLowerCase()
+        customerMap.set(normalizedEmail, {
+          id: acc.id || normalizedEmail,
+          name: acc.name || 'عميل',
+          email: acc.email,
+          createdAt: acc.created_at || new Date().toISOString(),
+          lastVideoAt: null,
+          videoMonths: [],
+          videoCount: 0,
+          ordersCount: 0,
+        })
+      })
+    }
+
+    // Process orders
+    if (orders) {
+      orders.forEach((o: any) => {
+        if (!o.customer_email) return
+        const normalizedEmail = o.customer_email.trim().toLowerCase()
+        const existing = customerMap.get(normalizedEmail)
+        if (existing) {
+          existing.ordersCount += 1
+          if (!existing.name || existing.name === 'عميل') {
+            existing.name = o.customer_name || existing.name
+          }
+        } else {
+          customerMap.set(normalizedEmail, {
+            id: `order-cust-${normalizedEmail}`,
+            name: o.customer_name || 'عميل',
+            email: o.customer_email,
+            createdAt: o.created_at || new Date().toISOString(),
+            lastVideoAt: null,
+            videoMonths: [],
+            videoCount: 0,
+            ordersCount: 1,
+          })
+        }
+      })
+    }
+
+    // Calculate active video count for each customer
+    if (reviews && reviews.length > 0) {
+      reviews.forEach((rev: any) => {
+        if (!rev.video_url) return
+        customerMap.forEach((cust, emailKey) => {
+          const uploaderKey = emailKey.replace(/[^a-zA-Z0-9]/g, '_')
+          if (rev.video_url.includes(`-u_${uploaderKey}-`)) {
+            cust.videoCount += 1
+            const vd = new Date(rev.created_at)
+            if (!isNaN(vd.getTime())) {
+              const vm = vd.getMonth() + 1
+              if (!cust.videoMonths.includes(vm)) cust.videoMonths.push(vm)
+              if (!cust.lastVideoAt || vd.getTime() > new Date(cust.lastVideoAt).getTime()) {
+                cust.lastVideoAt = vd.toISOString()
+              }
+            }
+          }
+        })
+      })
+    }
+
+    const customersList = Array.from(customerMap.values()).sort((a, b) =>
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    )
+
+    return { success: true, customers: customersList, accountsCount: accounts?.length ?? 0 }
+  } catch (error) {
+    console.error('Error fetching customers data:', error)
+    return { error: 'فشل تحميل بيانات العملاء', customers: [], accountsCount: 0 }
+  }
+}

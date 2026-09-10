@@ -1,533 +1,688 @@
-'use client'
+"use client";
 
-import { useEffect, useState, useCallback, useRef } from 'react'
-import { useRouter } from 'next/navigation'
-import { getBranchOrders, updateOrderStatus, deleteOrder, getBranchStatus, updateBranchStatus } from '@/app/actions/admin-actions'
-import { supabaseClient } from '@/lib/supabase-admin'
+import { useEffect, useState, useCallback, useRef } from "react";
+import { useRouter } from "next/navigation";
+import {
+  getBranchOrders,
+  updateOrderStatus,
+  deleteOrder,
+  getBranchStatus,
+  updateBranchStatus,
+  getCustomersData,
+  CustomerData,
+} from "@/app/actions/admin-actions";
+import { supabaseClient } from "@/lib/supabase-admin";
 
 // ────── NOTIFICATION TYPES ──────
 interface PendingNotification {
-  orderId: string
-  customerName: string
-  total: number
-  time: string
+  orderId: string;
+  customerName: string;
+  total: number;
+  time: string;
 }
 
 interface Cashier {
-  id: string
-  email: string
-  name: string
-  branchId: string
-  branchName: string
-  branchCity: string
+  id: string;
+  email: string;
+  name: string;
+  branchId: string;
+  branchName: string;
+  branchCity: string;
 }
 
 interface OrderItem {
-  id: string
-  product_name: string
-  product_name_ar?: string
-  product_id: string
-  quantity: number
-  price: number
+  id: string;
+  product_name: string;
+  product_name_ar?: string;
+  product_id: string;
+  quantity: number;
+  price: number;
 }
 
 interface Order {
-  id: string
-  customer_name: string
-  customer_phone: string
-  customer_email: string
-  customer_address: string
-  total_price: number
-  status: 'pending' | 'done' | 'canceled'
-  notes: string
-  created_at: string
-  order_items: OrderItem[]
+  id: string;
+  customer_name: string;
+  customer_phone: string;
+  customer_email: string;
+  customer_address: string;
+  total_price: number;
+  status: "pending" | "done" | "canceled";
+  notes: string;
+  created_at: string;
+  order_items: OrderItem[];
 }
 
 const STATUS_CONFIG = {
-  pending: { label: 'قيد الانتظار', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', border: 'rgba(245,158,11,0.3)', icon: '⏳', next: 'done' as const },
-  done:    { label: 'مكتمل',       color: '#10b981', bg: 'rgba(16,185,129,0.12)', border: 'rgba(16,185,129,0.3)', icon: '✅', next: 'canceled' as const },
-  canceled:{ label: 'ملغى',        color: '#ef4444', bg: 'rgba(239,68,68,0.12)',  border: 'rgba(239,68,68,0.3)',  icon: '❌', next: 'pending' as const },
-}
+  pending: {
+    label: "قيد الانتظار",
+    color: "#f59e0b",
+    bg: "rgba(245,158,11,0.12)",
+    border: "rgba(245,158,11,0.3)",
+    icon: "⏳",
+    next: "done" as const,
+  },
+  done: {
+    label: "مكتمل",
+    color: "#10b981",
+    bg: "rgba(16,185,129,0.12)",
+    border: "rgba(16,185,129,0.3)",
+    icon: "✅",
+    next: "canceled" as const,
+  },
+  canceled: {
+    label: "ملغى",
+    color: "#ef4444",
+    bg: "rgba(239,68,68,0.12)",
+    border: "rgba(239,68,68,0.3)",
+    icon: "❌",
+    next: "pending" as const,
+  },
+};
 
-const POLL_INTERVAL = 30000 // 30 seconds
-const NOTIFY_SOUND_URL = 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3'
+const POLL_INTERVAL = 30000; // 30 seconds
+const NOTIFY_SOUND_URL =
+  "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3";
 
 function formatTime(dateStr: string) {
-  const d = new Date(dateStr)
-  return d.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })
+  const d = new Date(dateStr);
+  return d.toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" });
 }
 function formatDate(dateStr: string) {
-  const d = new Date(dateStr)
-  return d.toLocaleDateString('ar-EG', { day: 'numeric', month: 'short' })
+  const d = new Date(dateStr);
+  return d.toLocaleDateString("ar-EG", { day: "numeric", month: "short" });
 }
 
 export default function AdminDashboardPage() {
-  const router = useRouter()
-  const [cashier, setCashier] = useState<Cashier | null>(null)
-  const [orders, setOrders] = useState<Order[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'done' | 'canceled'>('all')
-  const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [updatingId, setUpdatingId] = useState<string | null>(null)
-  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null)
-  const [lastRefresh, setLastRefresh] = useState(new Date())
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
-  const [notificationsEnabled, setNotificationsEnabled] = useState(false)
-  const [isStoreOpen, setIsStoreOpen] = useState(true)
-  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false)
-  const [realtimeStatus, setRealtimeStatus] = useState<'CONNECTING' | 'SUBSCRIBED' | 'ERROR' | 'OFF'>('OFF')
-  
+  const router = useRouter();
+  const [cashier, setCashier] = useState<Cashier | null>(null);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState<
+    "all" | "pending" | "done" | "canceled"
+  >("all");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [toast, setToast] = useState<{
+    msg: string;
+    type: "success" | "error";
+  } | null>(null);
+  const [lastRefresh, setLastRefresh] = useState(new Date());
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [isStoreOpen, setIsStoreOpen] = useState(true);
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+  const [realtimeStatus, setRealtimeStatus] = useState<
+    "CONNECTING" | "SUBSCRIBED" | "ERROR" | "OFF"
+  >("OFF");
+
   // ────── NEW: Unacknowledged orders state ──────
-  const [unacknowledgedOrders, setUnacknowledgedOrders] = useState<PendingNotification[]>([])
+  const [unacknowledgedOrders, setUnacknowledgedOrders] = useState<
+    PendingNotification[]
+  >([]);
 
-  const pollRef = useRef<NodeJS.Timeout | null>(null)
-  const branchRef = useRef<string>('')
-  const soundLoopRef = useRef<NodeJS.Timeout | null>(null)
-  const titleFlashRef = useRef<NodeJS.Timeout | null>(null)
-  const originalTitleRef = useRef('by Joka - Dashboard')
+  // ────── NEW: Customers view & Email search state ──────
+  const [activeTab, setActiveTab] = useState<"orders" | "customers">("orders");
+  const [emailSearch, setEmailSearch] = useState("");
+  const [customers, setCustomers] = useState<CustomerData[]>([]);
+  const [accountsCount, setAccountsCount] = useState(0);
+  const [isCustomersLoading, setIsCustomersLoading] = useState(false);
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [selectedMonth, setSelectedMonth] = useState<string>("all");
 
-  const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
-    setToast({ msg, type })
-    setTimeout(() => setToast(null), 3500)
-  }
+  const fetchCustomers = useCallback(async () => {
+    setIsCustomersLoading(true);
+    const result = await getCustomersData();
+    if (result.success && result.customers) {
+      setCustomers(result.customers);
+      setAccountsCount(result.accountsCount ?? 0);
+    }
+    setIsCustomersLoading(false);
+  }, []);
+
+  const pollRef = useRef<NodeJS.Timeout | null>(null);
+  const branchRef = useRef<string>("");
+  const soundLoopRef = useRef<NodeJS.Timeout | null>(null);
+  const titleFlashRef = useRef<NodeJS.Timeout | null>(null);
+  const originalTitleRef = useRef("by Joka - Dashboard");
+
+  const showToast = (msg: string, type: "success" | "error" = "success") => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3500);
+  };
 
   const playNotificationSound = useCallback(() => {
-    if (!notificationsEnabled) return
+    if (!notificationsEnabled) return;
     try {
-      const audio = new Audio(NOTIFY_SOUND_URL)
-      audio.volume = 1
-      const playPromise = audio.play()
+      const audio = new Audio(NOTIFY_SOUND_URL);
+      audio.volume = 1;
+      const playPromise = audio.play();
       if (playPromise !== undefined) {
-        playPromise.catch(() => {})
+        playPromise.catch(() => {});
       }
     } catch {
       // Silently ignore errors
     }
-  }, [notificationsEnabled])
+  }, [notificationsEnabled]);
 
   // ────── NEW: Start repeating sound loop until acknowledged ──────
   const startSoundLoop = useCallback(() => {
     // Clear any existing loop
-    if (soundLoopRef.current) clearInterval(soundLoopRef.current)
+    if (soundLoopRef.current) clearInterval(soundLoopRef.current);
     // Play immediately
-    playNotificationSound()
+    playNotificationSound();
     // Then repeat every 5 seconds
     soundLoopRef.current = setInterval(() => {
-      playNotificationSound()
-    }, 5000)
-  }, [playNotificationSound])
+      playNotificationSound();
+    }, 5000);
+  }, [playNotificationSound]);
 
   const stopSoundLoop = useCallback(() => {
     if (soundLoopRef.current) {
-      clearInterval(soundLoopRef.current)
-      soundLoopRef.current = null
+      clearInterval(soundLoopRef.current);
+      soundLoopRef.current = null;
     }
-  }, [])
+  }, []);
 
   // ────── NEW: Title flashing for browser tab ──────
   const startTitleFlash = useCallback(() => {
-    if (titleFlashRef.current) return
-    let isOriginal = true
+    if (titleFlashRef.current) return;
+    let isOriginal = true;
     titleFlashRef.current = setInterval(() => {
-      document.title = isOriginal ? '🔔 طلب جديد!' : originalTitleRef.current
-      isOriginal = !isOriginal
-    }, 1000)
-  }, [])
+      document.title = isOriginal ? "🔔 طلب جديد!" : originalTitleRef.current;
+      isOriginal = !isOriginal;
+    }, 1000);
+  }, []);
 
   const stopTitleFlash = useCallback(() => {
     if (titleFlashRef.current) {
-      clearInterval(titleFlashRef.current)
-      titleFlashRef.current = null
+      clearInterval(titleFlashRef.current);
+      titleFlashRef.current = null;
     }
-    document.title = originalTitleRef.current
-  }, [])
+    document.title = originalTitleRef.current;
+  }, []);
 
   // ────── NEW: Send native browser notification ──────
-  const sendBrowserNotification = useCallback(async (customerName: string, total: number, count: number) => {
-    console.log('🔔 Triggering notification:', { customerName, total, count });
-    
-    if (!('Notification' in window)) return;
-    
-    if (Notification.permission === 'default') {
-      await Notification.requestPermission();
-    }
-    
-    if (Notification.permission !== 'granted') {
-      console.warn('Notification permission not granted');
-      return;
-    }
+  const sendBrowserNotification = useCallback(
+    async (customerName: string, total: number, count: number) => {
+      console.log("🔔 Triggering notification:", {
+        customerName,
+        total,
+        count,
+      });
 
-    try {
-      // ────── AGGREGATION & RESET LOGIC ──────
-      // Use a fixed tag so the OS knows to replace the old alert with the new one
-      const notificationTag = 'shrimp-house-alert';
-      
-      const title = count > 1 ? `🔔 ولديك ${count} طلبات جديدة!` : 'طلب جديد - by Joka';
-      const body = count > 1 
-        ? `هناك ${count} طلبات تنتظر مراجعتك الآن`
-        : `${customerName} - ${total.toFixed(0)} ج.م`;
+      if (!("Notification" in window)) return;
 
-      const options: any = {
-        body,
-        icon: '/images/logo.png', // Verified path
-        badge: '/images/logo.png',
-        tag: notificationTag,
-        requireInteraction: true,
-        vibrate: [200, 100, 200],
-        silent: false,
-        renotify: true, // Forces sound/vibration even with same tag
-        actions: [
-          { action: 'view', title: '👁️ عرض الطلبات' }
-        ]
-      };
-
-      // We prefer the standard Notification for dashboard focus 
-      // but we will close any existing one with the same tag if possible via SW 
-      // or just trust the 'renotify: true' behavior.
-      
-      let notif: Notification | null = null;
-
-      // Try SW first for actions support
-      if ('serviceWorker' in navigator) {
-        const reg = await navigator.serviceWorker.getRegistration();
-        if (reg) {
-          // Explicitly close old ones to ensure the new one "pops"
-          const old = await reg.getNotifications({ tag: notificationTag });
-          old.forEach(n => n.close());
-          
-          await reg.showNotification(title, options);
-          
-          // Auto-close after 10 seconds
-          setTimeout(async () => {
-            const current = await reg.getNotifications({ tag: notificationTag });
-            current.forEach(n => n.close());
-          }, 10000);
-          return;
-        }
+      if (Notification.permission === "default") {
+        await Notification.requestPermission();
       }
 
-      // Fallback to standard
-      notif = new Notification(title, options);
-      notif.onclick = () => {
-        window.focus();
-        notif?.close();
-      };
-      
-      // Auto-close after 10 seconds
-      setTimeout(() => notif?.close(), 10000);
-    } catch (e) {
-      console.error('Notification error detail:', e);
-    }
-  }, [])
+      if (Notification.permission !== "granted") {
+        console.warn("Notification permission not granted");
+        return;
+      }
+
+      try {
+        // ────── AGGREGATION & RESET LOGIC ──────
+        // Use a fixed tag so the OS knows to replace the old alert with the new one
+        const notificationTag = "shrimp-house-alert";
+
+        const title =
+          count > 1 ? `🔔 ولديك ${count} طلبات جديدة!` : "طلب جديد - by Joka";
+        const body =
+          count > 1
+            ? `هناك ${count} طلبات تنتظر مراجعتك الآن`
+            : `${customerName} - ${total.toFixed(0)} ج.م`;
+
+        const options: any = {
+          body,
+          icon: "/images/logo.png", // Verified path
+          badge: "/images/logo.png",
+          tag: notificationTag,
+          requireInteraction: true,
+          vibrate: [200, 100, 200],
+          silent: false,
+          renotify: true, // Forces sound/vibration even with same tag
+          actions: [{ action: "view", title: "👁️ عرض الطلبات" }],
+        };
+
+        // We prefer the standard Notification for dashboard focus
+        // but we will close any existing one with the same tag if possible via SW
+        // or just trust the 'renotify: true' behavior.
+
+        let notif: Notification | null = null;
+
+        // Try SW first for actions support
+        if ("serviceWorker" in navigator) {
+          const reg = await navigator.serviceWorker.getRegistration();
+          if (reg) {
+            // Explicitly close old ones to ensure the new one "pops"
+            const old = await reg.getNotifications({ tag: notificationTag });
+            old.forEach((n) => n.close());
+
+            await reg.showNotification(title, options);
+
+            // Auto-close after 10 seconds
+            setTimeout(async () => {
+              const current = await reg.getNotifications({
+                tag: notificationTag,
+              });
+              current.forEach((n) => n.close());
+            }, 10000);
+            return;
+          }
+        }
+
+        // Fallback to standard
+        notif = new Notification(title, options);
+        notif.onclick = () => {
+          window.focus();
+          notif?.close();
+        };
+
+        // Auto-close after 10 seconds
+        setTimeout(() => notif?.close(), 10000);
+      } catch (e) {
+        console.error("Notification error detail:", e);
+      }
+    },
+    [],
+  );
 
   // ────── NEW: Acknowledge all pending notifications ──────
   const acknowledgeOrders = useCallback(() => {
-    setUnacknowledgedOrders([])
-    stopSoundLoop()
-    stopTitleFlash()
-  }, [stopSoundLoop, stopTitleFlash])
+    setUnacknowledgedOrders([]);
+    stopSoundLoop();
+    stopTitleFlash();
+  }, [stopSoundLoop, stopTitleFlash]);
 
   // ────── NEW: Handle incoming new order notification ──────
-  const handleNewOrderNotification = useCallback((orderData: { id: string; customer_name?: string; total_price?: number; created_at?: string }) => {
-    const notification: PendingNotification = {
-      orderId: orderData.id || 'unknown',
-      customerName: orderData.customer_name || 'عميل',
-      total: Number(orderData.total_price) || 0,
-      time: orderData.created_at || new Date().toISOString(),
-    }
-    
-    setUnacknowledgedOrders(prev => {
-      // Avoid duplicates
-      if (prev.some(n => n.orderId === notification.orderId)) return prev
-      const newList = [...prev, notification]
-      
-      // Native browser notification with the new count
-      sendBrowserNotification(notification.customerName, notification.total, newList.length)
-      
-      return newList
-    })
+  const handleNewOrderNotification = useCallback(
+    (orderData: {
+      id: string;
+      customer_name?: string;
+      total_price?: number;
+      created_at?: string;
+    }) => {
+      const notification: PendingNotification = {
+        orderId: orderData.id || "unknown",
+        customerName: orderData.customer_name || "عميل",
+        total: Number(orderData.total_price) || 0,
+        time: orderData.created_at || new Date().toISOString(),
+      };
 
-    // Start repeating sound
-    startSoundLoop()
-    // Flash title
-    startTitleFlash()
-    // Toast
-    showToast('🔔 طلب جديد وارد الآن!', 'success')
-  }, [startSoundLoop, startTitleFlash, sendBrowserNotification])
+      setUnacknowledgedOrders((prev) => {
+        // Avoid duplicates
+        if (prev.some((n) => n.orderId === notification.orderId)) return prev;
+        const newList = [...prev, notification];
+
+        // Native browser notification with the new count
+        sendBrowserNotification(
+          notification.customerName,
+          notification.total,
+          newList.length,
+        );
+
+        return newList;
+      });
+
+      // Start repeating sound
+      startSoundLoop();
+      // Flash title
+      startTitleFlash();
+      // Toast
+      showToast("🔔 طلب جديد وارد الآن!", "success");
+    },
+    [startSoundLoop, startTitleFlash, sendBrowserNotification],
+  );
 
   const testNotification = (e: React.MouseEvent) => {
-    e.stopPropagation()
+    e.stopPropagation();
     handleNewOrderNotification({
-      id: 'test-' + Date.now(),
-      customer_name: 'تجربة',
+      id: "test-" + Date.now(),
+      customer_name: "تجربة",
       total_price: 150,
       created_at: new Date().toISOString(),
-    })
-  }
+    });
+  };
 
   const fetchStatus = useCallback(async (branchId: string) => {
-    const res = await getBranchStatus(branchId)
-    if (res.success) setIsStoreOpen(res.isOpen)
-  }, [])
+    const res = await getBranchStatus(branchId);
+    if (res.success) setIsStoreOpen(res.isOpen);
+  }, []);
 
   const handleStoreStatusToggle = async () => {
-    if (!cashier || isUpdatingStatus) return
-    setIsUpdatingStatus(true)
-    const newValue = !isStoreOpen
-    const res = await updateBranchStatus(cashier.branchId, newValue)
+    if (!cashier || isUpdatingStatus) return;
+    setIsUpdatingStatus(true);
+    const newValue = !isStoreOpen;
+    const res = await updateBranchStatus(cashier.branchId, newValue);
     if (res.success) {
-      setIsStoreOpen(newValue)
-      showToast(newValue ? 'تم فتح المطعم لاستقبال الطلبات' : 'تم إغلاق المطعم وتوقف استقبال الطلبات', newValue ? 'success' : 'error')
+      setIsStoreOpen(newValue);
+      showToast(
+        newValue
+          ? "تم فتح المطعم لاستقبال الطلبات"
+          : "تم إغلاق المطعم وتوقف استقبال الطلبات",
+        newValue ? "success" : "error",
+      );
     } else {
-      showToast('فشل تحديث حالة المطعم', 'error')
+      showToast("فشل تحديث حالة المطعم", "error");
     }
-    setIsUpdatingStatus(false)
-  }
+    setIsUpdatingStatus(false);
+  };
 
   const fetchOrders = useCallback(async (branchId: string, silent = false) => {
-    if (!silent) setIsLoading(true)
+    if (!silent) setIsLoading(true);
     try {
       // Sync any recently completed Paymob payments automatically
-      await fetch('/api/paymob/sync-status').catch(() => {})
+      await fetch("/api/paymob/sync-status").catch(() => {});
     } catch {
       // Silently ignore sync errors
     }
 
-    const result = await getBranchOrders(branchId)
+    const result = await getBranchOrders(branchId);
     if (result.success) {
-      setOrders(result.orders as Order[])
-      setLastRefresh(new Date())
+      setOrders(result.orders as Order[]);
+      setLastRefresh(new Date());
     } else if (!silent) {
-      showToast('فشل تحميل الطلبات', 'error')
+      showToast("فشل تحميل الطلبات", "error");
     }
-    if (!silent) setIsLoading(false)
-  }, [])
+    if (!silent) setIsLoading(false);
+  }, []);
 
   useEffect(() => {
-    const stored = localStorage.getItem('cashier')
-    if (!stored) { router.push('/admin/login'); return }
-    const c = JSON.parse(stored) as Cashier
-    setCashier(c)
-    branchRef.current = c.branchId
-    fetchOrders(c.branchId)
-    fetchStatus(c.branchId)
+    const stored = localStorage.getItem("cashier");
+    if (!stored) {
+      router.push("/admin/login");
+      return;
+    }
+    const c = JSON.parse(stored) as Cashier;
+    setCashier(c);
+    branchRef.current = c.branchId;
+    fetchOrders(c.branchId);
+    fetchStatus(c.branchId);
+    fetchCustomers();
 
-    const notifySetting = localStorage.getItem(`notifications_${c.branchId}`)
-    if (notifySetting === 'true') setNotificationsEnabled(true)
+    const notifySetting = localStorage.getItem(`notifications_${c.branchId}`);
+    if (notifySetting === "true") setNotificationsEnabled(true);
 
     pollRef.current = setInterval(() => {
-      if (branchRef.current) fetchOrders(branchRef.current, true)
-    }, POLL_INTERVAL)
+      if (branchRef.current) fetchOrders(branchRef.current, true);
+    }, POLL_INTERVAL);
 
-    return () => { if (pollRef.current) clearInterval(pollRef.current) }
-  }, [fetchOrders, router, fetchStatus])
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [fetchOrders, router, fetchStatus, fetchCustomers]);
 
   // ────── NEW: Register Service Worker for better notifications ──────
   useEffect(() => {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(err => {
-        console.error('Service Worker registration failed:', err)
-      })
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch((err) => {
+        console.error("Service Worker registration failed:", err);
+      });
     }
-  }, [])
+  }, []);
 
   // ────── NEW: Listen for Service Worker messages and Tab Focus to acknowledge orders ──────
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
-      if (event.data && event.data.type === 'NOTIFICATION_CLICKED') {
-        acknowledgeOrders()
+      if (event.data && event.data.type === "NOTIFICATION_CLICKED") {
+        acknowledgeOrders();
       }
-    }
+    };
 
     const handleFocus = () => {
-      if (document.visibilityState === 'visible' || document.hasFocus()) {
-        acknowledgeOrders()
+      if (document.visibilityState === "visible" || document.hasFocus()) {
+        acknowledgeOrders();
       }
+    };
+
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.addEventListener("message", handleMessage);
     }
 
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.addEventListener('message', handleMessage)
-    }
-
-    window.addEventListener('focus', handleFocus)
-    document.addEventListener('visibilitychange', handleFocus)
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleFocus);
 
     // Handle initial state if page is focused
-    if (document.visibilityState === 'visible' || document.hasFocus()) {
-      const timer = setTimeout(handleFocus, 500)
+    if (document.visibilityState === "visible" || document.hasFocus()) {
+      const timer = setTimeout(handleFocus, 500);
       return () => {
-        clearTimeout(timer)
-        if ('serviceWorker' in navigator) {
-          navigator.serviceWorker.removeEventListener('message', handleMessage)
+        clearTimeout(timer);
+        if ("serviceWorker" in navigator) {
+          navigator.serviceWorker.removeEventListener("message", handleMessage);
         }
-        window.removeEventListener('focus', handleFocus)
-        document.removeEventListener('visibilitychange', handleFocus)
-      }
+        window.removeEventListener("focus", handleFocus);
+        document.removeEventListener("visibilitychange", handleFocus);
+      };
     }
 
     return () => {
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.removeEventListener('message', handleMessage)
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.removeEventListener("message", handleMessage);
       }
-      window.removeEventListener('focus', handleFocus)
-      document.removeEventListener('visibilitychange', handleFocus)
-    }
-  }, [acknowledgeOrders])
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleFocus);
+    };
+  }, [acknowledgeOrders]);
 
   // ────── NEW: Request browser notification permission when notifications enabled ──────
   useEffect(() => {
-    if (notificationsEnabled && 'Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission()
+    if (
+      notificationsEnabled &&
+      "Notification" in window &&
+      Notification.permission === "default"
+    ) {
+      Notification.requestPermission();
     }
-  }, [notificationsEnabled])
+  }, [notificationsEnabled]);
 
   // ────── NEW: Cleanup sound loop and title flash on unmount ──────
   useEffect(() => {
     return () => {
-      stopSoundLoop()
-      stopTitleFlash()
-    }
-  }, [stopSoundLoop, stopTitleFlash])
+      stopSoundLoop();
+      stopTitleFlash();
+    };
+  }, [stopSoundLoop, stopTitleFlash]);
 
-  const ordersRef = useRef<Order[]>([])
+  const ordersRef = useRef<Order[]>([]);
   useEffect(() => {
-    ordersRef.current = orders
-  }, [orders])
+    ordersRef.current = orders;
+  }, [orders]);
 
   // Realtime Subscription with improved logging
   useEffect(() => {
     if (!notificationsEnabled || !cashier) {
-      setRealtimeStatus('OFF')
-      return
+      setRealtimeStatus("OFF");
+      return;
     }
 
-    setRealtimeStatus('CONNECTING')
-    console.log('Attempting to subscribe to orders for branch:', cashier.branchId)
+    setRealtimeStatus("CONNECTING");
+    console.log(
+      "Attempting to subscribe to orders for branch:",
+      cashier.branchId,
+    );
 
     const channel = supabaseClient
       .channel(`orders-branch-${cashier.branchId}`)
       .on(
-        'postgres_changes',
+        "postgres_changes",
         {
-          event: '*',
-          schema: 'public',
-          table: 'orders',
+          event: "*",
+          schema: "public",
+          table: "orders",
         },
         (payload) => {
-          console.log('REALTIME: Received postgres event!', payload.eventType, payload)
-          
+          console.log(
+            "REALTIME: Received postgres event!",
+            payload.eventType,
+            payload,
+          );
+
           // Verify it's for this branch
-          if (payload.new && (payload.new as any).branch_id === cashier.branchId) {
-            const newOrder = payload.new as any
-            const isPending = newOrder.status === 'pending'
+          if (
+            payload.new &&
+            (payload.new as any).branch_id === cashier.branchId
+          ) {
+            const newOrder = payload.new as any;
+            const isPending = newOrder.status === "pending";
 
             if (isPending) {
               // Trigger notification:
               // 1. If it's a new INSERT order that is pending
               // 2. OR it is an UPDATE and the order was not pending in our active dashboard state
-              const previouslyPending = ordersRef.current.some(o => o.id === newOrder.id && o.status === 'pending')
-              
+              const previouslyPending = ordersRef.current.some(
+                (o) => o.id === newOrder.id && o.status === "pending",
+              );
+
               if (!previouslyPending) {
-                console.log('MATCH: New active order alert triggered!')
-                fetchOrders(cashier.branchId, true)
+                console.log("MATCH: New active order alert triggered!");
+                fetchOrders(cashier.branchId, true);
                 handleNewOrderNotification({
                   id: newOrder.id,
                   customer_name: newOrder.customer_name,
                   total_price: newOrder.total_price,
-                  created_at: newOrder.created_at
-                })
-                return
+                  created_at: newOrder.created_at,
+                });
+                return;
               }
             }
-            
+
             // Otherwise, silently refresh to update state
-            fetchOrders(cashier.branchId, true)
+            fetchOrders(cashier.branchId, true);
           }
-        }
+        },
       )
       .subscribe((status, err) => {
-        console.log('Realtime Status:', status, err || '')
-        if (status === 'SUBSCRIBED') {
-          setRealtimeStatus('SUBSCRIBED')
-        } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          setRealtimeStatus('ERROR')
-          console.error('Realtime connection issue detected:', status)
+        console.log("Realtime Status:", status, err || "");
+        if (status === "SUBSCRIBED") {
+          setRealtimeStatus("SUBSCRIBED");
+        } else if (
+          status === "CLOSED" ||
+          status === "CHANNEL_ERROR" ||
+          status === "TIMED_OUT"
+        ) {
+          setRealtimeStatus("ERROR");
+          console.error("Realtime connection issue detected:", status);
           // Delayed reload for Chrome as requested
           setTimeout(() => {
-            window.location.reload()
-          }, 3000)
+            window.location.reload();
+          }, 3000);
         }
-      })
+      });
 
     return () => {
-      console.log('Cleaning up realtime channel')
-      supabaseClient.removeChannel(channel)
-    }
-  }, [notificationsEnabled, cashier, fetchOrders, handleNewOrderNotification])
+      console.log("Cleaning up realtime channel");
+      supabaseClient.removeChannel(channel);
+    };
+  }, [notificationsEnabled, cashier, fetchOrders, handleNewOrderNotification]);
 
   const toggleNotifications = async () => {
-    const newValue = !notificationsEnabled
-    setNotificationsEnabled(newValue)
+    const newValue = !notificationsEnabled;
+    setNotificationsEnabled(newValue);
     if (cashier) {
-      localStorage.setItem(`notifications_${cashier.branchId}`, String(newValue))
+      localStorage.setItem(
+        `notifications_${cashier.branchId}`,
+        String(newValue),
+      );
     }
     // Unlock audio on first user interaction
     if (newValue) {
       try {
-        const testAudio = new Audio(NOTIFY_SOUND_URL)
-        testAudio.volume = 0
-        await testAudio.play()
-        testAudio.pause()
+        const testAudio = new Audio(NOTIFY_SOUND_URL);
+        testAudio.volume = 0;
+        await testAudio.play();
+        testAudio.pause();
       } catch {
         // Silently ignore - will try again on next notification
       }
     }
-    showToast(newValue ? 'تم تفعيل التنبيهات' : 'تم إيقاف التنبيهات')
-  }
+    showToast(newValue ? "تم تفعيل التنبيهات" : "تم إيقاف التنبيهات");
+  };
 
-  const handleStatusChange = async (orderId: string, status: 'pending' | 'done' | 'canceled') => {
-    if (!cashier || updatingId) return
-    setUpdatingId(orderId)
-    const result = await updateOrderStatus(orderId, status, cashier.branchId)
+  const handleStatusChange = async (
+    orderId: string,
+    status: "pending" | "done" | "canceled",
+  ) => {
+    if (!cashier || updatingId) return;
+    setUpdatingId(orderId);
+    const result = await updateOrderStatus(orderId, status, cashier.branchId);
     if (result.success) {
-      setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status } : o))
-      showToast('تم تحديث حالة الطلب')
+      setOrders((prev) =>
+        prev.map((o) => (o.id === orderId ? { ...o, status } : o)),
+      );
+      showToast("تم تحديث حالة الطلب");
     } else {
-      showToast('فشل تحديث الحالة', 'error')
+      showToast("فشل تحديث الحالة", "error");
     }
-    setUpdatingId(null)
-  }
+    setUpdatingId(null);
+  };
 
   const handleDelete = async (orderId: string) => {
-    if (!cashier) return
-    setDeletingId(orderId)
-    setConfirmDelete(null)
-    const result = await deleteOrder(orderId, cashier.branchId)
+    if (!cashier) return;
+    setDeletingId(orderId);
+    setConfirmDelete(null);
+    const result = await deleteOrder(orderId, cashier.branchId);
     if (result.success) {
-      setOrders(prev => prev.filter(o => o.id !== orderId))
-      showToast('تم حذف الطلب بنجاح')
+      setOrders((prev) => prev.filter((o) => o.id !== orderId));
+      showToast("تم حذف الطلب بنجاح");
     } else {
-      showToast('فشل حذف الطلب', 'error')
+      showToast("فشل حذف الطلب", "error");
     }
-    setDeletingId(null)
-  }
+    setDeletingId(null);
+  };
 
   const handleLogout = () => {
-    localStorage.removeItem('cashier')
-    router.push('/admin/login')
-  }
+    localStorage.removeItem("cashier");
+    router.push("/admin/login");
+  };
 
-  const filtered = orders.filter(o => statusFilter === 'all' || o.status === statusFilter)
+  const monthOptions = Array.from({ length: 12 }, (_, i) => i + 1);
+
+  const filtered = orders.filter((o) => {
+    const matchesStatus = statusFilter === "all" || o.status === statusFilter;
+    const searchLower = emailSearch.trim().toLowerCase();
+    const matchesEmail =
+      !searchLower ||
+      (o.customer_email &&
+        o.customer_email.toLowerCase().includes(searchLower)) ||
+      (o.customer_name &&
+        o.customer_name.toLowerCase().includes(searchLower)) ||
+      (o.customer_phone && o.customer_phone.includes(searchLower));
+    return matchesStatus && matchesEmail;
+  });
+
+  const filteredCustomers = customers.filter((c) => {
+    // Only show customers who have at least 1 active video
+    if (c.videoCount === 0) return false;
+
+    const searchLower = customerSearch.trim().toLowerCase();
+    const matchesSearch =
+      !searchLower ||
+      (c.name && c.name.toLowerCase().includes(searchLower)) ||
+      (c.email && c.email.toLowerCase().includes(searchLower));
+
+    const selectedMonthNum =
+      selectedMonth === "all" ? null : parseInt(selectedMonth, 10);
+    const matchesMonth =
+      selectedMonth === "all" ||
+      (selectedMonthNum
+        ? (c.videoMonths || []).includes(selectedMonthNum)
+        : false);
+
+    return matchesSearch && matchesMonth;
+  });
+
   const stats = {
     total: orders.length,
-    pending: orders.filter(o => o.status === 'pending').length,
-    done: orders.filter(o => o.status === 'done').length,
-    canceled: orders.filter(o => o.status === 'canceled').length,
-    revenue: orders.filter(o => o.status !== 'canceled').reduce((s, o) => s + Number(o.total_price), 0),
-  }
+    pending: orders.filter((o) => o.status === "pending").length,
+    done: orders.filter((o) => o.status === "done").length,
+    canceled: orders.filter((o) => o.status === "canceled").length,
+    revenue: orders
+      .filter((o) => o.status !== "canceled")
+      .reduce((s, o) => s + Number(o.total_price), 0),
+  };
 
-  if (!cashier) return null
+  if (!cashier) return null;
 
   return (
     <>
@@ -1350,6 +1505,225 @@ export default function AdminDashboardPage() {
         .notify-toggle {
           position: relative;
         }
+
+        /* ────── VIEW MODE TABS ────── */
+        .view-nav-tabs {
+          display: flex;
+          gap: 0.5rem;
+          margin-bottom: 1.25rem;
+          border-bottom: 1px solid rgba(255,255,255,0.08);
+          padding-bottom: 0.75rem;
+        }
+
+        .view-nav-btn {
+          display: flex;
+          align-items: center;
+          gap: 0.6rem;
+          padding: 0.6rem 1.25rem;
+          border-radius: 12px;
+          border: 1px solid rgba(255,255,255,0.08);
+          background: rgba(255,255,255,0.02);
+          color: rgba(255,255,255,0.6);
+          font-family: 'Tajawal', sans-serif;
+          font-size: 0.95rem;
+          font-weight: 700;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+
+        .view-nav-btn:hover {
+          background: rgba(255,255,255,0.06);
+          color: #fff;
+        }
+
+        .view-nav-btn.active {
+          background: linear-gradient(135deg, #0070c0, #00b4d8);
+          border-color: transparent;
+          color: #fff;
+          box-shadow: 0 4px 16px rgba(0, 180, 216, 0.3);
+        }
+
+        .view-badge {
+          padding: 0.15rem 0.55rem;
+          background: rgba(255,255,255,0.2);
+          border-radius: 50px;
+          font-size: 0.75rem;
+        }
+
+        /* ────── EMAIL SEARCH & CONTROLS ────── */
+        .search-box-container {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          background: rgba(255,255,255,0.04);
+          border: 1px solid rgba(0,160,220,0.25);
+          border-radius: 12px;
+          padding: 0.4rem 0.8rem;
+          min-width: 240px;
+          flex: 1;
+          max-width: 380px;
+        }
+
+        .search-box-container:focus-within {
+          border-color: rgba(0,200,255,0.6);
+          background: rgba(0,160,220,0.06);
+          box-shadow: 0 0 12px rgba(0,160,220,0.2);
+        }
+
+        .search-input-field {
+          background: transparent;
+          border: none;
+          outline: none;
+          color: #fff;
+          font-family: 'Tajawal', sans-serif;
+          font-size: 0.88rem;
+          width: 100%;
+        }
+
+        .search-input-field::placeholder {
+          color: rgba(255,255,255,0.35);
+        }
+
+        .select-month-dropdown {
+          background: rgba(8, 13, 22, 0.9);
+          border: 1px solid rgba(0,160,220,0.3);
+          color: #fff;
+          border-radius: 12px;
+          padding: 0.5rem 0.8rem;
+          font-family: 'Tajawal', sans-serif;
+          font-size: 0.88rem;
+          outline: none;
+          cursor: pointer;
+        }
+        .select-month-dropdown option {
+          background: #0d1929;
+          color: #fff;
+        }
+
+        /* ────── CUSTOMERS TABLE ────── */
+        .customers-container {
+          display: flex;
+          flex-direction: column;
+          gap: 1.25rem;
+        }
+
+        .customers-header-card {
+          background: rgba(255,255,255,0.025);
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 18px;
+          padding: 1.25rem 1.5rem;
+        }
+
+        .customers-stats-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+          gap: 1rem;
+          margin-top: 1rem;
+        }
+
+        .c-stat-box {
+          background: rgba(255,255,255,0.03);
+          border: 1px solid rgba(255,255,255,0.06);
+          border-radius: 14px;
+          padding: 1rem;
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+        }
+
+        .c-stat-icon {
+          width: 44px;
+          height: 44px;
+          border-radius: 12px;
+          background: rgba(0,180,216,0.15);
+          border: 1px solid rgba(0,180,216,0.3);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 1.3rem;
+          color: #00b4d8;
+        }
+
+        .c-stat-val {
+          font-size: 1.4rem;
+          font-weight: 800;
+          color: #fff;
+        }
+        .c-stat-lbl {
+          font-size: 0.78rem;
+          color: rgba(255,255,255,0.45);
+        }
+
+        .customers-table-wrapper {
+          background: rgba(255,255,255,0.025);
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 18px;
+          overflow-x: auto;
+        }
+
+        .cust-table {
+          width: 100%;
+          border-collapse: collapse;
+          text-align: right;
+          font-size: 0.9rem;
+        }
+
+        .cust-table th {
+          background: rgba(255,255,255,0.04);
+          padding: 1rem 1.25rem;
+          color: rgba(255,255,255,0.5);
+          font-weight: 700;
+          font-size: 0.82rem;
+          border-bottom: 1px solid rgba(255,255,255,0.08);
+          white-space: nowrap;
+        }
+
+        .cust-table td {
+          padding: 1rem 1.25rem;
+          border-bottom: 1px solid rgba(255,255,255,0.04);
+          color: #fff;
+          vertical-align: middle;
+          white-space: nowrap;
+        }
+
+        .cust-table tr:hover td {
+          background: rgba(0,160,220,0.04);
+        }
+
+        .vid-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.4rem;
+          padding: 0.35rem 0.75rem;
+          border-radius: 50px;
+          font-size: 0.82rem;
+          font-weight: 700;
+        }
+
+        .vid-badge.has-videos {
+          background: rgba(16,185,129,0.15);
+          border: 1px solid rgba(16,185,129,0.4);
+          color: #34d399;
+        }
+
+        .vid-badge.no-videos {
+          background: rgba(255,255,255,0.05);
+          border: 1px solid rgba(255,255,255,0.1);
+          color: rgba(255,255,255,0.4);
+        }
+
+        .orders-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.3rem;
+          padding: 0.35rem 0.75rem;
+          border-radius: 50px;
+          background: rgba(96,165,250,0.12);
+          border: 1px solid rgba(96,165,250,0.3);
+          color: #60a5fa;
+          font-size: 0.82rem;
+          font-weight: 700;
+        }
       `}</style>
 
       <div className="dash-page">
@@ -1361,14 +1735,21 @@ export default function AdminDashboardPage() {
                 <div className="banner-bell">🔔</div>
                 <div>
                   <div className="banner-text">
-                    <span className="banner-count">{unacknowledgedOrders.length}</span>
-                    {' '}
-                    {unacknowledgedOrders.length === 1 ? 'طلب جديد وارد!' : 'طلبات جديدة واردة!'}
+                    <span className="banner-count">
+                      {unacknowledgedOrders.length}
+                    </span>{" "}
+                    {unacknowledgedOrders.length === 1
+                      ? "طلب جديد وارد!"
+                      : "طلبات جديدة واردة!"}
                   </div>
                   <div className="banner-orders-list">
-                    {unacknowledgedOrders.map(n => (
+                    {unacknowledgedOrders.map((n) => (
                       <div key={n.orderId} className="banner-order-chip">
-                        👤 {n.customerName} — <span className="chip-total">{n.total.toFixed(0)} ج</span> — {formatTime(n.time)}
+                        👤 {n.customerName} —{" "}
+                        <span className="chip-total">
+                          {n.total.toFixed(0)} ج
+                        </span>{" "}
+                        — {formatTime(n.time)}
                       </div>
                     ))}
                   </div>
@@ -1384,41 +1765,64 @@ export default function AdminDashboardPage() {
         <header className="dash-header">
           <div className="dash-header-inner">
             <div className="header-brand">
-              <div className="brand-icon" style={{ background: 'transparent' }}>
-                <img src="/images/logo.png" alt="by Joka" style={{ height: '32px', width: 'auto' }} />
+              <div className="brand-icon" style={{ background: "transparent" }}>
+                <img
+                  src="/images/logo.png"
+                  alt="by Joka"
+                  style={{ height: "32px", width: "auto" }}
+                />
               </div>
               <div>
                 <div className="brand-name">by Joka</div>
-                <div className="brand-branch">فرع {cashier.branchName} <span className="live-dot" /></div>
+                <div className="brand-branch">
+                  فرع {cashier.branchName} <span className="live-dot" />
+                </div>
               </div>
             </div>
 
             <div className="header-right">
-              <div 
-                className={`store-toggle ${isStoreOpen ? 'open' : 'closed'}`}
+              <div
+                className={`store-toggle ${isStoreOpen ? "open" : "closed"}`}
                 onClick={handleStoreStatusToggle}
-                title={isStoreOpen ? 'إغلاق استقبال الطلبات' : 'فتح استقبال الطلبات'}
+                title={
+                  isStoreOpen ? "إغلاق استقبال الطلبات" : "فتح استقبال الطلبات"
+                }
               >
                 <div className="store-status-dot" />
-                <div className="store-label">{isStoreOpen ? 'المطعم مفتوح' : 'المطعم مغلق'}</div>
+                <div className="store-label">
+                  {isStoreOpen ? "المطعم مفتوح" : "المطعم مغلق"}
+                </div>
               </div>
 
-              <div 
-                className={`notify-toggle ${notificationsEnabled ? 'on' : ''}`}
+              <div
+                className={`notify-toggle ${notificationsEnabled ? "on" : ""}`}
                 onClick={toggleNotifications}
-                title={notificationsEnabled ? 'إيقاف التنبيهات' : 'تفعيل التنبيهات'}
+                title={
+                  notificationsEnabled ? "إيقاف التنبيهات" : "تفعيل التنبيهات"
+                }
               >
                 {unacknowledgedOrders.length > 0 && (
-                  <div className="notify-badge">{unacknowledgedOrders.length}</div>
+                  <div className="notify-badge">
+                    {unacknowledgedOrders.length}
+                  </div>
                 )}
                 <div className="toggle-label">🔔 الإشعارات</div>
-                
+
                 {notificationsEnabled && (
                   <>
-                    <button className="notify-test-btn" onClick={testNotification}>تجربة</button>
+                    <button
+                      className="notify-test-btn"
+                      onClick={testNotification}
+                    >
+                      تجربة
+                    </button>
                     <div className={`conn-status ${realtimeStatus}`}>
                       <div className="status-dot-small" />
-                      {realtimeStatus === 'SUBSCRIBED' ? 'متصل' : realtimeStatus === 'CONNECTING' ? 'جاري الاتصال' : 'خطأ'}
+                      {realtimeStatus === "SUBSCRIBED"
+                        ? "متصل"
+                        : realtimeStatus === "CONNECTING"
+                          ? "جاري الاتصال"
+                          : "خطأ"}
                     </div>
                   </>
                 )}
@@ -1426,12 +1830,12 @@ export default function AdminDashboardPage() {
                 <div className="toggle-switch">
                   <div className="toggle-circle" />
                 </div>
-                <div className="toggle-status">{notificationsEnabled ? 'ON' : 'OFF'}</div>
+                <div className="toggle-status">
+                  {notificationsEnabled ? "ON" : "OFF"}
+                </div>
               </div>
 
-              <div className="cashier-pill">
-                👤 {cashier.name}
-              </div>
+              <div className="cashier-pill">👤 {cashier.name}</div>
               <div className="refresh-info">
                 آخر تحديث: {formatTime(lastRefresh.toISOString())}
               </div>
@@ -1448,212 +1852,616 @@ export default function AdminDashboardPage() {
 
         {/* ── BODY ── */}
         <div className="dash-body">
-
-          {/* ── STATS ── */}
-          <div className="stats-grid">
-            <div
-              className={`stat-card ${statusFilter === 'all' ? 'active' : ''}`}
-              onClick={() => setStatusFilter('all')}
-            >
-              <div className="stat-icon">📋</div>
-              <div className="stat-value">{stats.total}</div>
-              <div className="stat-label">إجمالي الطلبات</div>
-            </div>
-            <div
-              className={`stat-card pending ${statusFilter === 'pending' ? 'active' : ''}`}
-              onClick={() => setStatusFilter('pending')}
-            >
-              <div className="stat-icon">⏳</div>
-              <div className="stat-value">{stats.pending}</div>
-              <div className="stat-label">قيد الانتظار</div>
-            </div>
-            <div
-              className={`stat-card done ${statusFilter === 'done' ? 'active' : ''}`}
-              onClick={() => setStatusFilter('done')}
-            >
-              <div className="stat-icon">✅</div>
-              <div className="stat-value">{stats.done}</div>
-              <div className="stat-label">مكتملة</div>
-            </div>
-            <div
-              className={`stat-card canceled ${statusFilter === 'canceled' ? 'active' : ''}`}
-              onClick={() => setStatusFilter('canceled')}
-            >
-              <div className="stat-icon">❌</div>
-              <div className="stat-value">{stats.canceled}</div>
-              <div className="stat-label">ملغية</div>
-            </div>
-            <div className="stat-card revenue">
-              <div className="stat-icon">💰</div>
-              <div className="stat-value">{stats.revenue.toLocaleString('ar-EG')} ج</div>
-              <div className="stat-label">إجمالي الإيرادات</div>
-            </div>
-          </div>
-
-          {/* ── FILTER BAR ── */}
-          <div className="filter-bar">
+          {/* ── VIEW MODE NAVIGATION TABS ── */}
+          <div className="view-nav-tabs">
             <button
-              className={`filter-btn ${statusFilter === 'all' ? 'active' : ''}`}
-              onClick={() => setStatusFilter('all')}
+              className={`view-nav-btn ${activeTab === "orders" ? "active" : ""}`}
+              onClick={() => setActiveTab("orders")}
             >
-              الكل <span className="filter-count">{stats.total}</span>
-            </button>
-            <button
-              className={`filter-btn ${statusFilter === 'pending' ? 'active' : ''}`}
-              onClick={() => setStatusFilter('pending')}
-            >
-              ⏳ انتظار <span className="filter-count">{stats.pending}</span>
-            </button>
-            <button
-              className={`filter-btn ${statusFilter === 'done' ? 'active' : ''}`}
-              onClick={() => setStatusFilter('done')}
-            >
-              ✅ مكتمل <span className="filter-count">{stats.done}</span>
-            </button>
-            <button
-              className={`filter-btn ${statusFilter === 'canceled' ? 'active' : ''}`}
-              onClick={() => setStatusFilter('canceled')}
-            >
-              ❌ ملغى <span className="filter-count">{stats.canceled}</span>
+              🍽️ إدارة الطلبات
+              <span className="view-badge">{orders.length}</span>
             </button>
 
             <button
-              className="refresh-btn"
-              onClick={() => cashier && fetchOrders(cashier.branchId)}
-              disabled={isLoading}
+              className={`view-nav-btn ${activeTab === "customers" ? "active" : ""}`}
+              onClick={() => {
+                setActiveTab("customers");
+                if (customers.length === 0) fetchCustomers();
+              }}
             >
-              <span className={isLoading ? 'spin' : ''}>🔄</span>
-              تحديث يدوي
+              👥 العملاء والفيديوهات
+              <span className="view-badge">{customers.length}</span>
             </button>
           </div>
 
-          {/* ── ORDERS ── */}
-          {isLoading ? (
-            <div className="loading-state">
-              <div className="loading-ring" />
-              <span>جاري تحميل طلبات فرع {cashier.branchName}...</span>
-            </div>
-          ) : filtered.length === 0 ? (
-            <div className="empty-state">
-              <div className="empty-icon">
-                {statusFilter === 'all' ? '🍽️' : statusFilter === 'pending' ? '⏳' : statusFilter === 'done' ? '✅' : '❌'}
+          {activeTab === "orders" ? (
+            <>
+              {/* ── STATS ── */}
+              <div className="stats-grid">
+                <div
+                  className={`stat-card ${statusFilter === "all" ? "active" : ""}`}
+                  onClick={() => setStatusFilter("all")}
+                >
+                  <div className="stat-icon">📋</div>
+                  <div className="stat-value">{stats.total}</div>
+                  <div className="stat-label">إجمالي الطلبات</div>
+                </div>
+                <div
+                  className={`stat-card pending ${statusFilter === "pending" ? "active" : ""}`}
+                  onClick={() => setStatusFilter("pending")}
+                >
+                  <div className="stat-icon">⏳</div>
+                  <div className="stat-value">{stats.pending}</div>
+                  <div className="stat-label">قيد الانتظار</div>
+                </div>
+                <div
+                  className={`stat-card done ${statusFilter === "done" ? "active" : ""}`}
+                  onClick={() => setStatusFilter("done")}
+                >
+                  <div className="stat-icon">✅</div>
+                  <div className="stat-value">{stats.done}</div>
+                  <div className="stat-label">مكتملة</div>
+                </div>
+                <div
+                  className={`stat-card canceled ${statusFilter === "canceled" ? "active" : ""}`}
+                  onClick={() => setStatusFilter("canceled")}
+                >
+                  <div className="stat-icon">❌</div>
+                  <div className="stat-value">{stats.canceled}</div>
+                  <div className="stat-label">ملغية</div>
+                </div>
+                <div
+                  className="stat-card"
+                  style={{
+                    borderColor: "rgba(0,180,216,0.3)",
+                    background: "rgba(0,180,216,0.06)",
+                    cursor: "pointer",
+                  }}
+                  onClick={() => {
+                    setActiveTab("customers");
+                    if (customers.length === 0) fetchCustomers();
+                  }}
+                >
+                  <div className="stat-icon">👥</div>
+                  <div className="stat-value" style={{ color: "#00b4d8" }}>
+                    {customers.length}
+                  </div>
+                  <div className="stat-label">للعملاء</div>
+                </div>
+                <div className="stat-card revenue">
+                  <div className="stat-icon">💰</div>
+                  <div className="stat-value">
+                    {stats.revenue.toLocaleString("ar-EG")} ج
+                  </div>
+                  <div className="stat-label">إجمالي الإيرادات</div>
+                </div>
               </div>
-              <div className="empty-title">لا توجد طلبات</div>
-              <div className="empty-sub">
-                {statusFilter === 'all'
-                  ? 'لم يصل أي طلب لهذا الفرع بعد'
-                  : `لا توجد طلبات بحالة "${STATUS_CONFIG[statusFilter].label}"`
-                }
+
+              {/* ── FILTER BAR WITH EMAIL SEARCH ── */}
+              <div className="filter-bar">
+                <button
+                  className={`filter-btn ${statusFilter === "all" ? "active" : ""}`}
+                  onClick={() => setStatusFilter("all")}
+                >
+                  الكل <span className="filter-count">{stats.total}</span>
+                </button>
+                <button
+                  className={`filter-btn ${statusFilter === "pending" ? "active" : ""}`}
+                  onClick={() => setStatusFilter("pending")}
+                >
+                  ⏳ انتظار{" "}
+                  <span className="filter-count">{stats.pending}</span>
+                </button>
+                <button
+                  className={`filter-btn ${statusFilter === "done" ? "active" : ""}`}
+                  onClick={() => setStatusFilter("done")}
+                >
+                  ✅ مكتمل <span className="filter-count">{stats.done}</span>
+                </button>
+                <button
+                  className={`filter-btn ${statusFilter === "canceled" ? "active" : ""}`}
+                  onClick={() => setStatusFilter("canceled")}
+                >
+                  ❌ ملغى <span className="filter-count">{stats.canceled}</span>
+                </button>
+
+                {/* EMAIL SEARCH FIELD IN TOTAL ORDERS SECTION */}
+                <div className="search-box-container">
+                  <span style={{ fontSize: "0.9rem" }}>📧</span>
+                  <input
+                    type="text"
+                    placeholder="بحث بالايميل في إجمالي الطلبات..."
+                    value={emailSearch}
+                    onChange={(e) => setEmailSearch(e.target.value)}
+                    className="search-input-field"
+                  />
+                  {emailSearch && (
+                    <button
+                      onClick={() => setEmailSearch("")}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "rgba(255,255,255,0.4)",
+                        cursor: "pointer",
+                      }}
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                <button
+                  className="refresh-btn"
+                  onClick={() => cashier && fetchOrders(cashier.branchId)}
+                  disabled={isLoading}
+                >
+                  <span className={isLoading ? "spin" : ""}>🔄</span>
+                  تحديث يدوي
+                </button>
               </div>
-            </div>
+            </>
           ) : (
-            <div className="orders-grid">
-              {filtered.map(order => (
-                <div key={order.id} className={`order-card ${order.status}`}>
-                  {/* Header */}
-                  <div className="order-header">
-                    <div className="order-customer">
-                      <div className="customer-avatar">👤</div>
-                      <div>
-                        <div className="customer-name">{order.customer_name}</div>
-                        <div className="customer-phone">📱 {order.customer_phone}</div>
-                      </div>
-                    </div>
-                    <div className="order-meta">
-                      <div className="order-time">
-                        <div>{formatDate(order.created_at)}</div>
-                        <div>{formatTime(order.created_at)}</div>
-                      </div>
-                      <div className="order-id">#{order.id.slice(0,8)}</div>
-                    </div>
+            /* ── CUSTOMERS VIEW ── */
+            <div className="customers-container">
+              <div className="customers-header-card">
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    gap: "1rem",
+                    marginBottom: "1rem",
+                  }}
+                >
+                  <div>
+                    <h2
+                      style={{
+                        fontSize: "1.2rem",
+                        fontWeight: 800,
+                        color: "#fff",
+                      }}
+                    >
+                      👥 قائمة العملاء وإحصائيات الفيديوهات
+                    </h2>
+                    <p
+                      style={{
+                        fontSize: "0.82rem",
+                        color: "rgba(255,255,255,0.45)",
+                        marginTop: "0.2rem",
+                      }}
+                    >
+                      عرض بيانات العملاء وتتبع الفيديوهات المرفوعة لكل شهر
+                      (تُخصم الفيديوهات المحذوفة تلقائياً من العدد)
+                    </p>
                   </div>
 
-                  {/* Body */}
-                  <div className="order-body">
-                    {/* Items + total */}
-                    <div className="items-section">
-                      <div className="section-title">🍽️ الطلبات</div>
-                      {order.order_items?.map(item => (
-                        <div key={item.id} className="item-row">
-                          <span className="item-name">
-                            {item.product_name_ar || item.product_name}
-                            <span className="item-qty">× {item.quantity}</span>
-                          </span>
-                          <span className="item-price">{(item.price * item.quantity).toFixed(0)} ج</span>
-                        </div>
-                      ))}
-                      <div className="total-row">
-                        <span>الإجمالي</span>
-                        <span className="total-amount">{Number(order.total_price).toFixed(0)} ج</span>
-                      </div>
-
-                      {order.notes && (
-                        <div className="notes-box">
-                          <div className="notes-label">💬 ملاحظات</div>
-                          {order.notes}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Customer info */}
-                    <div className="info-section">
-                      <div className="section-title">📋 بيانات العميل</div>
-                      {order.customer_email && (
-                        <div className="info-row">
-                          <span className="info-icon">✉️</span>
-                          <span className="info-text">{order.customer_email}</span>
-                        </div>
-                      )}
-                      {order.customer_address && (
-                        <div className="info-row">
-                          <span className="info-icon">📍</span>
-                          <span className="info-text">{order.customer_address}</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Footer */}
-                  <div className="order-footer">
-                    <div className="status-btns">
-                      {(['pending', 'done', 'canceled'] as const).map(s => (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.75rem",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <div
+                      className="search-box-container"
+                      style={{ minWidth: "220px" }}
+                    >
+                      <span>🔍</span>
+                      <input
+                        type="text"
+                        placeholder="بحث بالاسم أو البريد الإلكتروني..."
+                        value={customerSearch}
+                        onChange={(e) => setCustomerSearch(e.target.value)}
+                        className="search-input-field"
+                      />
+                      {customerSearch && (
                         <button
-                          key={s}
-                          className={`status-btn ${s} ${order.status === s ? 'current' : ''}`}
-                          onClick={() => order.status !== s && handleStatusChange(order.id, s)}
-                          disabled={updatingId === order.id}
+                          onClick={() => setCustomerSearch("")}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            color: "rgba(255,255,255,0.4)",
+                            cursor: "pointer",
+                          }}
                         >
-                          {STATUS_CONFIG[s].icon} {STATUS_CONFIG[s].label}
+                          ✕
                         </button>
-                      ))}
+                      )}
                     </div>
+
+                    <select
+                      value={selectedMonth}
+                      onChange={(e) => setSelectedMonth(e.target.value)}
+                      className="select-month-dropdown"
+                    >
+                      <option value="all">📅 كل الأشهر</option>
+                      {monthOptions.map((m) => {
+                        const dateObj = new Date(2000, m - 1, 1);
+                        const monthName = !isNaN(dateObj.getTime())
+                          ? dateObj.toLocaleDateString("ar-EG", {
+                              month: "long",
+                            })
+                          : String(m);
+                        const value = String(m).padStart(2, "0");
+                        return (
+                          <option key={value} value={value}>
+                            {monthName}
+                          </option>
+                        );
+                      })}
+                    </select>
 
                     <button
-                      className="delete-btn"
-                      onClick={() => setConfirmDelete(order.id)}
-                      disabled={deletingId === order.id}
-                      id={`delete-order-${order.id.slice(0,8)}`}
+                      className="refresh-btn"
+                      onClick={fetchCustomers}
+                      disabled={isCustomersLoading}
                     >
-                      {deletingId === order.id ? '⌛' : '🗑️'} حذف
+                      <span className={isCustomersLoading ? "spin" : ""}>
+                        🔄
+                      </span>
+                      تحديث
                     </button>
                   </div>
                 </div>
-              ))}
+
+                <div className="customers-stats-grid">
+                  <div className="c-stat-box">
+                    <div className="c-stat-icon">👥</div>
+                    <div>
+                      <div className="c-stat-val">{accountsCount}</div>
+                      <div className="c-stat-lbl">
+                        إجمالي العملاء (Accounts)
+                      </div>
+                    </div>
+                  </div>
+                  <div className="c-stat-box">
+                    <div
+                      className="c-stat-icon"
+                      style={{
+                        background: "rgba(16,185,129,0.15)",
+                        borderColor: "rgba(16,185,129,0.3)",
+                        color: "#10b981",
+                      }}
+                    >
+                      🎥
+                    </div>
+                    <div>
+                      <div className="c-stat-val" style={{ color: "#34d399" }}>
+                        {filteredCustomers.length}
+                      </div>
+                      <div className="c-stat-lbl">
+                        عملاء رفعوا فيديوهات (بعد الفلتر)
+                      </div>
+                    </div>
+                  </div>
+                  <div className="c-stat-box">
+                    <div
+                      className="c-stat-icon"
+                      style={{
+                        background: "rgba(245,158,11,0.15)",
+                        borderColor: "rgba(245,158,11,0.3)",
+                        color: "#f59e0b",
+                      }}
+                    >
+                      🎬
+                    </div>
+                    <div>
+                      <div className="c-stat-val" style={{ color: "#fbbf24" }}>
+                        {filteredCustomers.reduce(
+                          (sum, c) => sum + c.videoCount,
+                          0,
+                        )}
+                      </div>
+                      <div className="c-stat-lbl">إجمالي الفيديوهات النشطة</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {isCustomersLoading ? (
+                <div className="loading-state">
+                  <div className="loading-ring" />
+                  <span>جاري تحميل بيانات العملاء...</span>
+                </div>
+              ) : filteredCustomers.length === 0 ? (
+                <div className="empty-state">
+                  <div className="empty-icon">👥</div>
+                  <div className="empty-title">لا يوجد عملاء مطابقين</div>
+                  <div className="empty-sub">
+                    جرّب تغيير كلمة البحث أو اختيار شهر آخر
+                  </div>
+                </div>
+              ) : (
+                <div className="customers-table-wrapper">
+                  <table className="cust-table">
+                    <thead>
+                      <tr>
+                        <th>اسم العميل</th>
+                        <th>البريد الإلكتروني</th>
+                        <th>تاريخ الانضمام</th>
+                        <th>الشهر</th>
+                        <th>عدد الفيديوهات المرفوعة</th>
+                        <th>إجمالي الطلبات</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredCustomers.map((cust) => {
+                        const dateObj = new Date(cust.createdAt);
+                        const formattedDate = !isNaN(dateObj.getTime())
+                          ? dateObj.toLocaleDateString("ar-EG", {
+                              day: "numeric",
+                              month: "long",
+                              year: "numeric",
+                            })
+                          : "—";
+                        const videoDateObj = cust.lastVideoAt
+                          ? new Date(cust.lastVideoAt)
+                          : null;
+                        const selectedMonthNum =
+                          selectedMonth === "all"
+                            ? null
+                            : parseInt(selectedMonth, 10);
+                        const monthForDisplay = selectedMonthNum
+                          ? new Date(2000, selectedMonthNum - 1, 1)
+                          : videoDateObj || null;
+                        const formattedMonth =
+                          monthForDisplay && !isNaN(monthForDisplay.getTime())
+                            ? monthForDisplay.toLocaleDateString("ar-EG", {
+                                month: "long",
+                              })
+                            : "—";
+
+                        return (
+                          <tr key={cust.id}>
+                            <td>
+                              <div
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "0.6rem",
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    width: "34px",
+                                    height: "34px",
+                                    borderRadius: "10px",
+                                    background:
+                                      "linear-gradient(135deg, rgba(0,112,192,0.3), rgba(0,180,216,0.3))",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    fontSize: "0.9rem",
+                                    fontWeight: "bold",
+                                    color: "#fff",
+                                  }}
+                                >
+                                  {cust.name
+                                    ? cust.name.charAt(0).toUpperCase()
+                                    : "👤"}
+                                </div>
+                                <span style={{ fontWeight: 700 }}>
+                                  {cust.name}
+                                </span>
+                              </div>
+                            </td>
+                            <td
+                              style={{
+                                color: "rgba(0,200,255,0.85)",
+                                direction: "ltr",
+                                textAlign: "right",
+                              }}
+                            >
+                              {cust.email}
+                            </td>
+                            <td
+                              style={{
+                                color: "rgba(255,255,255,0.7)",
+                                fontSize: "0.85rem",
+                              }}
+                            >
+                              {formattedDate}
+                            </td>
+                            <td>
+                              <span
+                                style={{
+                                  padding: "0.2rem 0.6rem",
+                                  background: "rgba(255,255,255,0.05)",
+                                  borderRadius: "6px",
+                                  fontSize: "0.78rem",
+                                  color: "rgba(255,255,255,0.6)",
+                                }}
+                              >
+                                🗓️ {formattedMonth}
+                              </span>
+                            </td>
+                            <td>
+                              <span
+                                className={`vid-badge ${cust.videoCount > 0 ? "has-videos" : "no-videos"}`}
+                              >
+                                🎥 {cust.videoCount}{" "}
+                                {cust.videoCount === 1
+                                  ? "فيديو"
+                                  : cust.videoCount === 2
+                                    ? "فيديو"
+                                    : "فيديوهات"}
+                              </span>
+                            </td>
+                            <td>
+                              <span className="orders-badge">
+                                📦 {cust.ordersCount}{" "}
+                                {cust.ordersCount === 1 ? "طلب" : "طلبات"}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
+
+          {/* ── ORDERS (shown only in orders tab) ── */}
+          {activeTab === "orders" &&
+            (isLoading ? (
+              <div className="loading-state">
+                <div className="loading-ring" />
+                <span>جاري تحميل طلبات فرع {cashier.branchName}...</span>
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="empty-state">
+                <div className="empty-icon">
+                  {statusFilter === "all"
+                    ? "🍽️"
+                    : statusFilter === "pending"
+                      ? "⏳"
+                      : statusFilter === "done"
+                        ? "✅"
+                        : "❌"}
+                </div>
+                <div className="empty-title">لا توجد طلبات</div>
+                <div className="empty-sub">
+                  {statusFilter === "all"
+                    ? "لم يصل أي طلب لهذا الفرع بعد"
+                    : `لا توجد طلبات بحالة "${STATUS_CONFIG[statusFilter].label}"`}
+                </div>
+              </div>
+            ) : (
+              <div className="orders-grid">
+                {filtered.map((order) => (
+                  <div key={order.id} className={`order-card ${order.status}`}>
+                    {/* Header */}
+                    <div className="order-header">
+                      <div className="order-customer">
+                        <div className="customer-avatar">👤</div>
+                        <div>
+                          <div className="customer-name">
+                            {order.customer_name}
+                          </div>
+                          <div className="customer-phone">
+                            📱 {order.customer_phone}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="order-meta">
+                        <div className="order-time">
+                          <div>{formatDate(order.created_at)}</div>
+                          <div>{formatTime(order.created_at)}</div>
+                        </div>
+                        <div className="order-id">#{order.id.slice(0, 8)}</div>
+                      </div>
+                    </div>
+
+                    {/* Body */}
+                    <div className="order-body">
+                      <div className="items-section">
+                        <div className="section-title">🍽️ الطلبات</div>
+                        {order.order_items?.map((item) => (
+                          <div key={item.id} className="item-row">
+                            <span className="item-name">
+                              {item.product_name_ar || item.product_name}
+                              <span className="item-qty">
+                                × {item.quantity}
+                              </span>
+                            </span>
+                            <span className="item-price">
+                              {(item.price * item.quantity).toFixed(0)} ج
+                            </span>
+                          </div>
+                        ))}
+                        <div className="total-row">
+                          <span>الإجمالي</span>
+                          <span className="total-amount">
+                            {Number(order.total_price).toFixed(0)} ج
+                          </span>
+                        </div>
+                        {order.notes && (
+                          <div className="notes-box">
+                            <div className="notes-label">💬 ملاحظات</div>
+                            {order.notes}
+                          </div>
+                        )}
+                      </div>
+                      <div className="info-section">
+                        <div className="section-title">📋 بيانات العميل</div>
+                        {order.customer_email && (
+                          <div className="info-row">
+                            <span className="info-icon">✉️</span>
+                            <span className="info-text">
+                              {order.customer_email}
+                            </span>
+                          </div>
+                        )}
+                        {order.customer_address && (
+                          <div className="info-row">
+                            <span className="info-icon">📍</span>
+                            <span className="info-text">
+                              {order.customer_address}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Footer */}
+                    <div className="order-footer">
+                      <div className="status-btns">
+                        {(["pending", "done", "canceled"] as const).map((s) => (
+                          <button
+                            key={s}
+                            className={`status-btn ${s} ${order.status === s ? "current" : ""}`}
+                            onClick={() =>
+                              order.status !== s &&
+                              handleStatusChange(order.id, s)
+                            }
+                            disabled={updatingId === order.id}
+                          >
+                            {STATUS_CONFIG[s].icon} {STATUS_CONFIG[s].label}
+                          </button>
+                        ))}
+                      </div>
+                      <button
+                        className="delete-btn"
+                        onClick={() => setConfirmDelete(order.id)}
+                        disabled={deletingId === order.id}
+                        id={`delete-order-${order.id.slice(0, 8)}`}
+                      >
+                        {deletingId === order.id ? "⌛" : "🗑️"} حذف
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ))}
         </div>
       </div>
 
       {/* ── CONFIRM DELETE DIALOG ── */}
       {confirmDelete && (
         <div className="confirm-overlay" onClick={() => setConfirmDelete(null)}>
-          <div className="confirm-box" onClick={e => e.stopPropagation()}>
+          <div className="confirm-box" onClick={(e) => e.stopPropagation()}>
             <div className="confirm-icon">🗑️</div>
             <div className="confirm-title">تأكيد الحذف</div>
-            <div className="confirm-desc">هل أنت متأكد من حذف هذا الطلب؟ لا يمكن التراجع عن هذا الإجراء.</div>
+            <div className="confirm-desc">
+              هل أنت متأكد من حذف هذا الطلب؟ لا يمكن التراجع عن هذا الإجراء.
+            </div>
             <div className="confirm-btns">
-              <button className="btn-cancel-confirm" onClick={() => setConfirmDelete(null)}>إلغاء</button>
-              <button className="btn-confirm-delete" onClick={() => handleDelete(confirmDelete)}>نعم، احذف</button>
+              <button
+                className="btn-cancel-confirm"
+                onClick={() => setConfirmDelete(null)}
+              >
+                إلغاء
+              </button>
+              <button
+                className="btn-confirm-delete"
+                onClick={() => handleDelete(confirmDelete)}
+              >
+                نعم، احذف
+              </button>
             </div>
           </div>
         </div>
@@ -1662,9 +2470,9 @@ export default function AdminDashboardPage() {
       {/* ── TOAST ── */}
       {toast && (
         <div className={`toast ${toast.type}`}>
-          {toast.type === 'success' ? '✅' : '❌'} {toast.msg}
+          {toast.type === "success" ? "✅" : "❌"} {toast.msg}
         </div>
       )}
     </>
-  )
+  );
 }
